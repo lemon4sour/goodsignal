@@ -22,7 +22,6 @@
 -- Authors:                                                                   --
 --   stravant - July 31st, 2021 - Created the file.                           --
 --------------------------------------------------------------------------------
---!nocheck
 
 -- The currently idle thread to run the next handler on
 local freeRunnerThread = nil
@@ -54,21 +53,26 @@ local function runEventHandlerInFreeThread()
 	end
 end
 
+export type Connection = {
+	Disconnect: (Connection) -> (),
+	Connected: boolean,
+}
+
 -- Connection class
 local Connection = {}
 Connection.__index = Connection
 
-function Connection.new(signal, fn)
+function Connection.new(signal, fn): Connection
 	return setmetatable({
-		_connected = true,
+		Connected = true,
 		_signal = signal,
 		_fn = fn,
 		_next = false,
-	}, Connection)
+	}, Connection) :: Connection
 end
 
 function Connection:Disconnect()
-	self._connected = false
+	self.Connected = false
 
 	-- Unhook the node, but DON'T clear it. That way any fire calls that are
 	-- currently sitting on this node will be able to iterate forwards off of
@@ -89,33 +93,30 @@ end
 
 -- Make Connection strict
 setmetatable(Connection, {
-	__index = function(_, key)
+	__index = function(tb, key)
 		error(("Attempt to get Connection::%s (not a valid member)"):format(tostring(key)), 2)
 	end,
-	__newindex = function(_, key)
+	__newindex = function(tb, key, value)
 		error(("Attempt to set Connection::%s (not a valid member)"):format(tostring(key)), 2)
 	end,
 })
 
-export type Connection = {
-	Disconnect: (self: Connection) -> (),
-}
-
-export type Signal<T...> = {
-	Connect: (self: Signal<T...>, callback: (T...) -> ()) -> Connection,
-	Once: (self: Signal<T...>, callback: (T...) -> ()) -> Connection,
-	Fire: (self: Signal<T...>, T...) -> (),
-	Wait: (self: Signal<T...>) -> T...,
+export type Signal<T, P...> = {
+	Connect: (Signal<T, P...>, listener: T) -> Connection,
+	Once: (Signal<T, P...>, listener: T) -> Connection,
+	Fire: (Signal<T, P...>, P...) -> (),
+	Wait: (Signal<T, P...>) -> P...,
+	DisconnectAll: (Signal<T, P...>) -> (),
 }
 
 -- Signal class
 local Signal = {}
 Signal.__index = Signal
 
-function Signal.new<T...>(): Signal<T...>
+function Signal.new<T, P...>(): Signal<T, P...>
 	return setmetatable({
 		_handlerListHead = false,
-	}, Signal) :: any
+	}, Signal) :: Signal<T, P...>
 end
 
 function Signal:Connect(fn)
@@ -142,7 +143,7 @@ end
 function Signal:Fire(...)
 	local item = self._handlerListHead
 	while item do
-		if item._connected then
+		if item.Connected then
 			if not freeRunnerThread then
 				freeRunnerThread = coroutine.create(runEventHandlerInFreeThread)
 				-- Get the freeRunnerThread to the first yield
@@ -171,7 +172,7 @@ end
 function Signal:Once(fn)
 	local cn
 	cn = self:Connect(function(...)
-		if cn._connected then
+		if cn.Connected then
 			cn:Disconnect()
 		end
 		fn(...)
@@ -181,10 +182,10 @@ end
 
 -- Make signal strict
 setmetatable(Signal, {
-	__index = function(_, key)
+	__index = function(tb, key)
 		error(("Attempt to get Signal::%s (not a valid member)"):format(tostring(key)), 2)
 	end,
-	__newindex = function(_, key)
+	__newindex = function(tb, key, value)
 		error(("Attempt to set Signal::%s (not a valid member)"):format(tostring(key)), 2)
 	end,
 })
